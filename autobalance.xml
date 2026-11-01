@@ -1,0 +1,240 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!-- MJCF -->
+<!-- Formato MuJoCo: XML para describir los componentes físicos del robot y cómo
+     encajan entre sí. Referencia: 
+     https://mujoco.readthedocs.io/en/stable/XMLreference.html -->
+
+<mujoco model="bala2-fire-simplified">
+
+  <!-- ===================================================================== -->
+  <!-- Configuración (Settings) -->
+
+  <!-- Configura las opciones para el analizador sintáctico y compilador:
+       angle: "degree" (por defecto en MJCF) o "radian" (radianes)
+       coordinate: posiciones/orientaciones expresadas en marco "local" o "global"
+       meshdir: ruta absoluta o relativa a los archivos STL
+       autolimits: establece automáticamente limited="true" si se da un atributo de rango -->
+  <compiler angle="radian"
+            coordinate="local"
+            meshdir="meshes"
+            autolimits="true"/>
+
+  <!-- Configura las opciones para la simulación de física:
+       timestep: tiempo entre cada paso de medición/control en el simulador (5 ms)[cite: 1]
+       gravity: vector de aceleración gravitacional
+       integrator: algoritmo utilizado para calcular posiciones/velocidades -->
+  <option timestep="0.005"
+          gravity="0 0 -9.81"
+          integrator="implicitfast"/>
+
+  <!-- Especifica valores predeterminados para varios atributos -->
+  <default>
+    <!-- Valores predeterminados de geometría: superficies sólidas con fricción razonable
+         contype: máscara de bits del grupo de colisión al que pertenece la geometría
+         conaffinity: máscara de bits del grupo con el que esta geometría puede colisionar
+         friction: coeficientes (deslizamiento, torsional, de rodadura)
+
+         Nota: la fricción de contacto entre dos geometrías es el valor máximo entre
+         sus valores de fricción. 0.8 es una estimación para caucho sobre piso/escritorio[cite: 1] -->
+    <geom contype="1" 
+          conaffinity="1" 
+          friction="0.8 0.005 0.0001"/>
+  </default>
+
+  <!-- ===================================================================== -->
+  <!-- Activos: mallas y texturas visuales (Assets) -->
+
+  <!-- Define los activos a utilizar al construir el mundo -->
+  <asset>
+    <!-- Define la malla, la ubicación del archivo y la escala (convertir a metros) -->
+    <mesh name="chassis_mesh"
+          file="chassis.stl"
+          scale="0.001 0.001 0.001"/>
+    <mesh name="wheel_left_mesh"
+          file="wheel_left.stl"
+          scale="0.001 0.001 0.001"/>
+    <mesh name="wheel_right_mesh"
+          file="wheel_right.stl"
+          scale="0.001 0.001 0.001"/>
+
+    <!-- Usa un degradé simple para la textura del cielo -->
+    <texture type="skybox"
+             builtin="gradient"
+             rgb1="0.5 0.7 1"
+             rgb2="0.95 0.95 1"
+             width="256"
+             height="256"/>
+
+    <!-- Usa un patrón de cuadrícula incorporado para crear la textura de la grilla -->
+    <texture name="grid"
+             type="2d"
+             builtin="checker"
+             rgb1="0.2 0.3 0.4"
+             rgb2="0.3 0.4 0.5"
+             width="512"
+             height="512"
+             mark="cross"
+             markrgb="0.8 0.8 0.8"/>
+
+    <!-- Crea un material de cuadrícula a partir de la textura de la grilla -->
+    <material name="grid"
+              texture="grid"
+              texrepeat="5 5"
+              reflectance="0"
+              specular="0"
+              shininess="0"/>
+  </asset>
+
+  <!-- ===================================================================== -->
+  <!-- Mundo y cuerpos del robot (World and robot bodies) -->
+
+  <!-- El mundo y todo lo que contiene -->
+  <worldbody>
+
+    <!-- Iluminación -->
+    <light pos="0 0 1.5" 
+           dir="0 0 -1" 
+           diffuse="0.8 0.8 0.8"/>
+
+    <!-- Plano del suelo en z=0 con textura de cuadrícula. Si el tamaño x o y se establece en 0, 
+         el plano es infinitamente ancho/largo con tamaño 0. Lo haremos grande pero finito. -->
+    <geom name="ground"
+          type="plane"
+          size="5 5 0.1"
+          material="grid"/>
+
+    <!-- Define el robot como un árbol anidado de cuerpos y uniones (joints). El origen del
+         chasis es el centro de los ejes, el cual se sitúa a 22.5 mm sobre el suelo 
+         (radio de la rueda). Esto permite que las ruedas toquen el suelo al iniciar el episodio.[cite: 1] -->
+    <body name="chassis" pos="0 0 0.0225">
+
+      <!-- Unión libre (freejoint): el robot puede trasladarse y orientarse libremente en el marco mundial[cite: 1] -->
+      <freejoint name="root"/>
+
+      <!-- Geometría visual y de colisión -->
+      <geom name="chassis_geom"
+            type="mesh"
+            mesh="chassis_mesh"
+            rgba="0.87 0.23 0.16 1.0"/>
+
+      <!-- Propiedades inerciales del chasis (copiadas de la salida del script de FreeCAD)[cite: 1] -->
+      <inertial pos="0.000000 0.000000 0.017000" 
+                mass="0.127000" 
+                diaginertia="0.000056790 0.000054532 0.000058722"/>
+
+      <!-- Sitio para el sensor IMU: medido desde el origen del chasis, se muestra
+           como una bola azul (estará dentro del chasis) -->
+      <site name="imu_site"
+            type="box"
+            pos="-0.008 0.0225 0.040" 
+            size="0.003 0.003 0.00035"
+            rgba="0 0 1.0 1.0"/>
+
+      <!-- Caja visual opcional para mostrar el "frente" del robot -->
+      <geom type="box"
+            size="0.001 0.01 0.005" 
+            pos="0.027 0 0.02"
+            rgba="0 1.0 0 1.0" 
+            contype="0" 
+            conaffinity="0"/>
+
+      <!-- Rueda izquierda -->
+      <body name="wheel_left" pos="0 0.04 0">
+
+        <!-- Unión (Joint): conecta el cuerpo con su padre y define el movimiento
+             type: free, ball, slide, hinge (libre, esférica, deslizante, bisagra)
+             axis: rota alrededor de un eje para el tipo bisagra
+             damping: resistencia viscosa
+             frictionloss: resistencia al movimiento 
+             armature: inercia rotacional del motor reflejada a través de la caja reductora
+                       Inercia rotacional estimada del motor N20: 5e-8 Kg-m^2.
+                       Con una caja 1:N, multiplicamos la inercia por N^2 para obtener
+                       la inercia reflejada. Entonces, 5e-8 * 30^2 = 4.5e-5 Kg-m^2.
+                       Esto es ~10x la inercia de la rueda, por lo que domina.[cite: 1] -->
+        <joint name="left_wheel_joint" 
+               type="hinge" 
+               axis="0 1 0"
+               damping="0.001" 
+               frictionloss="0.001"
+               armature="4.5e-5"/>
+
+        <!-- Asigna una malla y le da un color. Usa los valores predeterminados de 
+             colisión y fricción. -->
+        <geom name="wheel_left_geom" 
+              type="mesh" 
+              mesh="wheel_left_mesh"
+              rgba="0.1 0.1 0.1 1.0"/>
+
+        <!-- Propiedades inerciales de la rueda (copiadas de la salida del script de FreeCAD)[cite: 1] -->
+        <inertial pos="0.000000 0.000000 0.000000"
+                  mass="0.017000" 
+                  diaginertia="0.000002611 0.000004303 0.000002611"/>
+      </body>
+
+      <!-- Rueda derecha -->
+      <body name="wheel_right" pos="0 -0.04 0">
+        <joint name="right_wheel_joint" 
+               type="hinge" 
+               axis="0 1 0"
+               damping="0.001" 
+               frictionloss="0.001"
+               armature="4.5e-5"/>
+        <geom name="wheel_right_geom" 
+              type="mesh" 
+              mesh="wheel_right_mesh"
+              rgba="0.1 0.1 0.1 1.0"/>
+        <inertial pos="0.000000 0.000000 0.000000" 
+                  mass="0.017000" 
+                  diaginertia="0.000002611 0.000004303 0.000002611"/>
+      </body>
+    </body>
+  </worldbody>
+
+  <!-- ===================================================================== -->
+  <!-- Actuadores: motores que impulsan las uniones de las ruedas (Actuators) -->
+
+  <actuator>
+
+    <!-- Motor izquierdo conectado a la unión de la rueda izquierda. Nota que autolimits
+         se establece en "true" en el elemento compiler, lo que significa que ctrlrange
+         determina los límites del actuador (es decir, ctrllimited se establece 
+         automáticamente en "true").
+
+         El torque de control (para una unión de bisagra) está determinado por gear * ctrl (unidades
+         de N-m). Para el aprendizaje por refuerzo, ayuda tener un ctrl normalizado,
+         por lo que establecemos los límites en [-1, 1]. Con la desmultiplicación (gear) en 0.05,
+         eso nos da límites reales de -0.05 a 0.05 N-m, lo cual es una estimación decente
+         de nuestro motor N20 con una caja reductora 1:30.[cite: 1] --> 
+    <motor name="left_motor"
+           joint="left_wheel_joint" 
+           gear="0.05"
+           ctrlrange="-1 1"/>
+
+    <!-- Motor derecho conectado a la unión de la rueda derecha -->
+    <motor name="right_motor" 
+           joint="right_wheel_joint" 
+           gear="0.05"
+           ctrlrange="-1 1"/>
+  </actuator>
+
+  <!-- ===================================================================== -->
+  <!-- Sensores: IMU y encoders (Sensors) -->
+
+  <!-- Define todos los sensores y sus ubicaciones -->
+  <sensor>
+    <!-- Sensores IMU en imu_site. Aunque nuestro MPU6886 solo proporciona datos de giroscopio y
+         aceleración, aquí podemos obtener la orientación real (ground-truth) para ayudarnos
+         con el entrenamiento (incluso si no la tenemos en el robot real).[cite: 1] -->
+    <accelerometer name="imu_accel" site="imu_site"/>
+    <gyro name="imu_gyro" site="imu_site"/>
+    <framequat name="imu_orientation" objtype="site" objname="imu_site"/>
+
+    <!-- Encoders de las ruedas (posición y velocidad de la unión) -->
+    <jointpos name="left_wheel_pos" joint="left_wheel_joint"/>
+    <jointpos name="right_wheel_pos" joint="right_wheel_joint"/>
+    <jointvel name="left_wheel_vel" joint="left_wheel_joint"/>
+    <jointvel name="right_wheel_vel" joint="right_wheel_joint"/>
+  </sensor>
+
+</mujoco>
