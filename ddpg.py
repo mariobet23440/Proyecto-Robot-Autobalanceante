@@ -139,7 +139,6 @@ class DDPGAgent:
         self.max_action = max_action    # Valor máximo de acción
         self.gamma = 0.99               # Factor de descuento
         self.tau = 0.005                # Tasa de actualización suave (Polyak averaging)
-        
 
     def select_action(self, state, noise=0.1):
         """
